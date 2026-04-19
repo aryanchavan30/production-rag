@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 import hashlib
@@ -6,6 +7,8 @@ from rag.ingestion.parser import parse_document, parse_directory, ParsedDocument
 from rag.ingestion.chunker import DocumentChunker
 from rag.ingestion.embedder import Embedder
 from rag.ingestion.indexer import QdrantIndexer, BM25Indexer
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -36,6 +39,7 @@ class IngestionPipeline:
         chunker_embed_model_path: str = "models/potion-base-32M",
         embed_batch_size: int = 32,
     ):
+        logger.info("Initialising IngestionPipeline")
         self.bm25_index_path = bm25_index_path
         self._embed_batch_size = embed_batch_size
 
@@ -55,31 +59,40 @@ class IngestionPipeline:
         )
         self.bm25 = BM25Indexer(index_path=bm25_index_path)
         self._all_chunks: list[dict] = []
+        logger.info("IngestionPipeline ready")
 
     def ingest_file(self, file_path: Path) -> IngestionResult:
+        logger.info(f"[INGEST] Starting file: {file_path}")
         result = IngestionResult()
         try:
             doc = parse_document(file_path)
             self._process_document(doc, result)
             self._flush_bm25()
         except Exception as e:
+            logger.error(f"Failed to ingest {file_path}: {e}")
             result.errors.append(f"{file_path}: {e}")
+        logger.info(f"[INGEST] Done — {result.files_processed} file(s), {result.chunks_indexed} chunk(s)")
         return result
 
     def ingest_directory(self, directory: Path) -> IngestionResult:
+        logger.info(f"[INGEST] Starting directory: {directory}")
         result = IngestionResult()
         documents = parse_directory(directory)
         for doc in documents:
             try:
                 self._process_document(doc, result)
             except Exception as e:
+                logger.error(f"Failed to process {doc.source}: {e}")
                 result.errors.append(f"{doc.source}: {e}")
         self._flush_bm25()
+        logger.info(f"[INGEST] Done — {result.files_processed} file(s), {result.chunks_indexed} chunk(s), {len(result.errors)} error(s)")
         return result
 
     def _process_document(self, doc: ParsedDocument, result: IngestionResult) -> None:
+        logger.info(f"Processing: {doc.filename}")
         chunks = self.chunker.chunk(doc.text, source=doc.source)
         if not chunks:
+            logger.warning(f"No chunks produced for {doc.filename}, skipping")
             return
 
         texts = [c.text for c in chunks]
@@ -101,8 +114,10 @@ class IngestionPipeline:
 
         result.files_processed += 1
         result.chunks_indexed += len(chunks)
+        logger.info(f"Indexed {doc.filename}: {len(chunks)} chunks → Qdrant + BM25 queue")
 
     def _flush_bm25(self) -> None:
         if self._all_chunks:
+            logger.info(f"Flushing BM25 index ({len(self._all_chunks)} total chunks)")
             self.bm25.build(self._all_chunks)
             self.bm25.save()

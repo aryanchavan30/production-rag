@@ -1,6 +1,8 @@
 from pathlib import Path
 import typer
 from rich.console import Console
+from rag import setup_logging
+setup_logging()
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 

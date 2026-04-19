@@ -1,6 +1,10 @@
+import logging
+
 import numpy as np
 from rag.ingestion.embedder import Embedder
 from rag.ingestion.indexer import QdrantIndexer, BM25Indexer
+
+logger = logging.getLogger(__name__)
 
 
 def rrf_fuse(results_list: list[list[dict]], k: int = 60) -> list[dict]:
@@ -30,7 +34,15 @@ class HybridRetriever:
         self.top_k = top_k
 
     def retrieve(self, query: str) -> list[dict]:
+        logger.info(f"[RETRIEVE] Query: '{query[:80]}'")
         query_vec = self.embedder.embed([query])[0]
+
         dense = self.qdrant.search(query_vec, top_k=self.top_k)
+        logger.info(f"[RETRIEVE] Dense (Qdrant): {len(dense)} results")
+
         sparse = self.bm25.search(query, top_k=self.top_k)
-        return rrf_fuse([dense, sparse], k=60)[: self.top_k]
+        logger.info(f"[RETRIEVE] Sparse (BM25): {len(sparse)} results")
+
+        fused = rrf_fuse([dense, sparse], k=60)[: self.top_k]
+        logger.info(f"[RETRIEVE] RRF fusion: {len(fused)} unique docs (top scores: {[round(d['rrf_score'], 4) for d in fused[:3]]})")
+        return fused

@@ -1,10 +1,15 @@
 import asyncio
 import json
+import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from langchain_openai import ChatOpenAI
+
+from rag import setup_logging
+setup_logging()
 
 from rag.config import settings
 from rag.generation.generator import generate_stream
@@ -15,12 +20,14 @@ from rag.retrieval.reranker import BGEReranker
 from rag.retrieval.retriever import HybridRetriever
 from rag.api.schemas import QueryRequest
 
+logger = logging.getLogger(__name__)
 
 _graph: AdaptiveRAGGraph | None = None
 _llm: ChatOpenAI | None = None
 
 
 def _build_graph() -> tuple[AdaptiveRAGGraph, ChatOpenAI]:
+    logger.info("Loading pipeline components...")
     llm = ChatOpenAI(
         model=settings.llm_model,
         base_url=settings.llm_base_url,
@@ -37,6 +44,7 @@ def _build_graph() -> tuple[AdaptiveRAGGraph, ChatOpenAI]:
     retriever = HybridRetriever(qdrant=qdrant, bm25=bm25, embedder=embedder)
     reranker = BGEReranker(model_path=settings.reranker_model_path)
     graph = AdaptiveRAGGraph(retriever=retriever, reranker=reranker, llm=llm)
+    logger.info("Pipeline ready")
     return graph, llm
 
 
@@ -59,10 +67,14 @@ async def health():
 async def query_endpoint(request: QueryRequest):
     graph = _graph
     llm = _llm
+    logger.info(f"[API] POST /query — question='{request.question}' top_k={request.top_k}")
 
     async def event_stream():
+        t0 = time.time()
         state = await asyncio.to_thread(graph.run_retrieval, request.question)
         docs = state["documents"]
+        elapsed = time.time() - t0
+        logger.info(f"[API] Retrieval done in {elapsed:.2f}s — {len(docs)} doc(s)")
 
         sources = [
             {
@@ -79,6 +91,7 @@ async def query_endpoint(request: QueryRequest):
             yield f"data: {json.dumps({'type': 'token', 'text': token})}\n\n"
 
         yield "data: [DONE]\n\n"
+        logger.info(f"[API] Stream complete for: '{request.question[:60]}'")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 

@@ -1,6 +1,8 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
 
 SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".docx"}
 PLAIN_TEXT_EXTENSIONS = {".txt", ".md"}
@@ -23,11 +25,15 @@ def parse_document(file_path: Path) -> ParsedDocument:
             f"Unsupported file type '{ext}'. Supported: {SUPPORTED_EXTENSIONS}"
         )
 
+    logger.info(f"Parsing {file_path.name} (type={ext})")
+
     if ext in PLAIN_TEXT_EXTENSIONS:
         text = file_path.read_text(encoding="utf-8")
     else:
+        logger.info(f"Using Docling for {file_path.name}")
         text = _parse_with_docling(file_path)
 
+    logger.info(f"Parsed {file_path.name} → {len(text):,} chars")
     return ParsedDocument(
         text=text.strip(),
         source=str(file_path),
@@ -37,10 +43,14 @@ def parse_document(file_path: Path) -> ParsedDocument:
 
 def parse_directory(directory: Path) -> list[ParsedDocument]:
     directory = Path(directory)
+    supported = [
+        f for f in sorted(directory.rglob("*"))
+        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+    ]
+    logger.info(f"Found {len(supported)} supported file(s) in {directory}")
     documents = []
-    for file_path in sorted(directory.rglob("*")):
-        if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_EXTENSIONS:
-            documents.append(parse_document(file_path))
+    for file_path in supported:
+        documents.append(parse_document(file_path))
     return documents
 
 
