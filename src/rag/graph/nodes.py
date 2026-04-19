@@ -42,8 +42,9 @@ def make_retrieve_node(retriever: HybridRetriever, reranker: BGEReranker, top_k:
 def make_grade_node(llm: ChatOpenAI):
     def grade_documents(state: RAGState) -> dict:
         question = state["question"]
+        original_docs = state["documents"]
         relevant = []
-        for doc in state["documents"]:
+        for doc in original_docs:
             prompt = (
                 f"Is this document relevant to the question? Answer YES or NO only.\n"
                 f"Question: {question}\n"
@@ -52,7 +53,8 @@ def make_grade_node(llm: ChatOpenAI):
             resp = llm.invoke([HumanMessage(content=prompt)])
             if "yes" in resp.content.lower():
                 relevant.append(doc)
-        return {"documents": relevant}
+        # If the grader filtered everything out, trust the reranker scores instead
+        return {"documents": relevant if relevant else original_docs}
     return grade_documents
 
 
